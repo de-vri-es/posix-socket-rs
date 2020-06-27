@@ -1,6 +1,14 @@
 use std::os::raw::c_int;
 
+/// A type usable as socket address.
 pub trait AsSocketAddress {
+	/// Construct a new instance that is usable to copy an address into.
+	///
+	/// After construction, an address may be written into the memory pointed to by [`as_sockaddr_mut()`],
+	/// limited by [`max_len()`].
+	/// Afterwards, [`set_len()`] will be called with the actual address length.
+	fn new_empty() -> Self;
+
 	/// Get a pointer to the socket address.
 	///
 	/// In reality, this should point to a struct that is compatible with [`libc::sockaddr`],
@@ -35,9 +43,7 @@ pub trait AsSocketAddress {
 	fn max_len(&self) -> libc::socklen_t;
 }
 
-/// Generic socket address.
-///
-/// This struct is large enough to hold any socket address.
+/// Generic socket address, large enough to hold any valid address.
 #[derive(Clone)]
 #[repr(C)]
 pub struct SocketAddress {
@@ -70,7 +76,7 @@ pub struct SocketAddressInet6 {
 
 /// Unix socket address.
 ///
-/// This could be an unnamed address or a filesystem path.
+/// A Unix socket address can be unnamed or a filesystem path.
 /// On Linux it can also be an abstract socket path.
 #[derive(Clone)]
 #[repr(C)]
@@ -125,6 +131,10 @@ impl SocketAddress {
 }
 
 impl AsSocketAddress for SocketAddress {
+	fn new_empty() -> Self {
+		unsafe { std::mem::zeroed() }
+	}
+
 	fn as_sockaddr(&self) -> *const libc::sockaddr {
 		&self.inner as *const _ as *const _
 	}
@@ -148,6 +158,10 @@ impl AsSocketAddress for SocketAddress {
 }
 
 impl AsSocketAddress for SocketAddressInet4 {
+	fn new_empty() -> Self {
+		unsafe { std::mem::zeroed() }
+	}
+
 	fn as_sockaddr(&self) -> *const libc::sockaddr {
 		&self.inner as *const _ as *const _
 	}
@@ -170,6 +184,10 @@ impl AsSocketAddress for SocketAddressInet4 {
 }
 
 impl AsSocketAddress for SocketAddressInet6 {
+	fn new_empty() -> Self {
+		unsafe { std::mem::zeroed() }
+	}
+
 	fn as_sockaddr(&self) -> *const libc::sockaddr {
 		&self.inner as *const _ as *const _
 	}
@@ -192,6 +210,10 @@ impl AsSocketAddress for SocketAddressInet6 {
 }
 
 impl AsSocketAddress for SocketAddressUnix {
+	fn new_empty() -> Self {
+		unsafe { std::mem::zeroed() }
+	}
+
 	fn as_sockaddr(&self) -> *const libc::sockaddr {
 		&self.inner as *const _ as *const _
 	}

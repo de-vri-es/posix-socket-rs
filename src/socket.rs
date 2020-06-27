@@ -178,7 +178,7 @@ impl Socket {
 	/// See `man listen` for more information.
 	pub fn accept<Address: AsSocketAddress>(&self) -> std::io::Result<(Self, Address)> {
 		unsafe {
-			let mut address: Address = std::mem::zeroed();
+			let mut address = Address::new_empty();
 			let mut len = address.max_len();
 			let fd = check_ret(libc::accept4(self.as_raw_fd(), address.as_sockaddr_mut(), &mut len, libc::SOCK_CLOEXEC))?;
 			let socket = Self::wrap(FileDesc::from_raw_fd(fd))?;
@@ -252,7 +252,7 @@ impl Socket {
 		};
 
 		unsafe {
-			let mut address : Address = std::mem::zeroed();
+			let mut address = Address::new_empty();
 			let mut header = std::mem::zeroed::<libc::msghdr>();
 			header.msg_name = address.as_sockaddr_mut() as *mut c_void;
 			header.msg_namelen = address.max_len();
