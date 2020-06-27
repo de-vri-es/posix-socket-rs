@@ -133,6 +133,60 @@ impl Socket {
 		}
 	}
 
+	/// Connect the socket to a remote address.
+	///
+	/// It depends on the exact socket type what it means to connect the socket.
+	/// See `man connect` for more information.
+	pub fn connect<Address: AsSocketAddress>(&self, address: Address) -> std::io::Result<()> {
+		unsafe {
+			check_ret(libc::connect(self.as_raw_fd(), address.as_sockaddr(), address.len()))?;
+			Ok(())
+		}
+	}
+
+	/// Bind the socket to a local address.
+	///
+	/// It depends on the exact socket type what it means to bind the socket.
+	/// See `man connect` for more information.
+	pub fn bind<Address: AsSocketAddress>(&self, address: Address) -> std::io::Result<()> {
+		unsafe {
+			check_ret(libc::bind(self.as_raw_fd(), address.as_sockaddr(), address.len()))?;
+			Ok(())
+		}
+	}
+
+	/// Put the socket in listening mode, ready to accept connections.
+	///
+	/// Once the socket is in listening mode,
+	/// new connections can be accepted with [`accept()`](Socket::accept).
+	///
+	/// Not all socket types can be put into listening mode.
+	/// See `man listen` for more information.
+	pub fn listen(&self, backlog: c_int) -> std::io::Result<()> {
+		unsafe {
+			check_ret(libc::listen(self.as_raw_fd(), backlog))?;
+			Ok(())
+		}
+	}
+
+	/// Accept a new connection on the socket.
+	///
+	/// The socket must have been put in listening mode
+	/// with a call to [`listen()`](Socket::listen).
+	///
+	/// Not all socket types can be put into listening mode or accept connections.
+	/// See `man listen` for more information.
+	pub fn accept<Address: AsSocketAddress>(&self) -> std::io::Result<(Self, Address)> {
+		unsafe {
+			let mut address: Address = std::mem::zeroed();
+			let mut len = address.max_len();
+			let fd = check_ret(libc::accept4(self.as_raw_fd(), address.as_sockaddr_mut(), &mut len, libc::SOCK_CLOEXEC))?;
+			let socket = Self::wrap(FileDesc::from_raw_fd(fd))?;
+			address.set_len(len);
+			Ok((socket, address))
+		}
+	}
+
 	/// Send a message over the socket to the connected peer.
 	pub fn send_msg(&self, data: &[IoSlice], cdata: Option<&[u8]>, flags: c_int) -> std::io::Result<usize> {
 		unsafe {
