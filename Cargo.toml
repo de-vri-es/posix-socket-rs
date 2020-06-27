@@ -1,0 +1,21 @@
+[package]
+name = "posix-socket"
+description = "thin wrapper around POSIX sockets"
+version = "0.1.0"
+license = "BSD-2-Clause"
+authors = ["Maarten de Vries <maarten@de-vri.es>"]
+
+repository = "https://github.com/de-vri-es/posix-socket-rs"
+documentation = "https://docs.rs/posix-socket"
+readme = "README.md"
+keywords = ["socket", "unix", "posix"]
+categories = ["network-programming", "os::unix-apis", "os::macos-apis"]
+
+edition = "2018"
+
+[dev-dependencies]
+assert2 = "0.2.1"
+
+[dependencies]
+filedesc = "0.1.0"
+libc = "0.2.71"
