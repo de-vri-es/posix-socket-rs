@@ -1,4 +1,5 @@
 use std::os::raw::c_int;
+use std::path::Path;
 
 /// A type usable as socket address.
 pub trait AsSocketAddress {
@@ -89,6 +90,31 @@ pub struct SocketAddressUnix {
 }
 
 impl SocketAddress {
+	/// Create a [`SocketAddress`] from a [`libc::sockaddr_storage`] and a length.
+	pub fn from_raw(inner: libc::sockaddr_storage, len: libc::socklen_t) -> Self {
+		Self { inner, len }
+	}
+
+	/// Create a generic [`SocketAddress`] by copying data from another address.
+	pub fn from_other<Address: AsSocketAddress>(other: &Address) -> Self {
+		unsafe {
+			let mut output = Self::new_empty();
+			std::ptr::copy(
+				other.as_sockaddr(),
+				output.as_sockaddr_mut(),
+				other.len() as usize
+			);
+			output.set_len(other.len());
+			output
+		}
+	}
+
+	/// Convert the [`SocketAddress`] into raw [`libc`] parts.
+	pub fn into_raw(self) -> (libc::sockaddr_storage, libc::socklen_t) {
+		(self.inner, self.len)
+	}
+
+	/// Get the address family.
 	pub fn family(&self) -> c_int {
 		self.inner.ss_family as c_int
 	}
@@ -127,6 +153,144 @@ impl SocketAddress {
 		} else {
 			None
 		}
+	}
+}
+
+impl From<&SocketAddressInet4> for SocketAddress {
+	fn from(other: &SocketAddressInet4) -> Self {
+		Self::from_other(other)
+	}
+}
+
+impl From<&SocketAddressInet6> for SocketAddress {
+	fn from(other: &SocketAddressInet6) -> Self {
+		Self::from_other(other)
+	}
+}
+
+impl From<&SocketAddressUnix> for SocketAddress {
+	fn from(other: &SocketAddressUnix) -> Self {
+		Self::from_other(other)
+	}
+}
+
+impl SocketAddressInet4 {
+	/// Create an IPv4 socket address from an IP address and a port number.
+	pub fn new(ip: [u8; 4], port: u16) -> Self {
+		unsafe {
+			let ip : u32 = std::mem::transmute(ip);
+			let inner = libc::sockaddr_in {
+				sin_family: libc::AF_INET as libc::sa_family_t,
+				sin_addr: libc::in_addr { s_addr: ip },
+				sin_port: port.to_be(),
+				..std::mem::zeroed()
+			};
+			Self::from_raw(inner)
+		}
+	}
+
+	/// Create an IPv4 socket address from a [`libc::sockaddr_in`].
+	pub fn from_raw(inner: libc::sockaddr_in) -> Self {
+		Self { inner }
+	}
+
+	/// Convert the [`SocketAddress`] into raw [`libc`] parts.
+	pub fn into_raw(self) -> libc::sockaddr_in {
+		self.inner
+	}
+}
+
+impl SocketAddressInet6 {
+	/// Create an IPv6 socket address from an IP address and a port number.
+	pub fn new(ip: [u8; 16], port: u16) -> Self {
+		unsafe {
+			let inner = libc::sockaddr_in6 {
+				sin6_family: libc::AF_INET6 as libc::sa_family_t,
+				sin6_addr: libc::in6_addr { s6_addr: ip },
+				sin6_port: port.to_be(),
+				..std::mem::zeroed()
+			};
+			Self::from_raw(inner)
+		}
+	}
+
+	/// Create an IPv6 socket address from a [`libc::sockaddr_in6`].
+	pub fn from_raw(inner: libc::sockaddr_in6) -> Self {
+		Self { inner }
+	}
+
+	/// Convert the [`SocketAddress`] into raw [`libc`] parts.
+	pub fn into_raw(self) -> libc::sockaddr_in6 {
+		self.inner
+	}
+}
+
+impl SocketAddressUnix {
+	/// Create a Unix socket address from a path.
+	pub fn new<P: AsRef<Path>>(path: P) -> std::io::Result<Self> {
+		use std::os::unix::ffi::OsStrExt;
+		let path = path.as_ref().as_os_str();
+
+		unsafe {
+			let mut output = Self::new_empty();
+			let path_offset = output.path_offset();
+			// TODO: does self.len() include the trailing null byte?
+			if path.len() >= output.max_len() as usize - path_offset {
+				Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "path too large for socket address"))
+			} else {
+				std::ptr::copy(
+					path.as_bytes().as_ptr(),
+					output.as_sockaddr_mut() as *mut u8,
+					path.len(),
+				);
+				output.set_len((path_offset + path.len()) as u32);
+				Ok(output)
+			}
+		}
+	}
+
+	/// Create an IPv6 socket address from a [`libc::sockaddr_un`] and a length.
+	pub fn from_raw(inner: libc::sockaddr_un, len: libc::socklen_t) -> Self {
+		Self { inner, len }
+	}
+
+	/// Convert the [`SocketAddress`] into raw [`libc`] parts.
+	pub fn into_raw(self) -> (libc::sockaddr_un, libc::socklen_t) {
+		(self.inner, self.len)
+	}
+
+	/// Get the socket address as a [`Path`].
+	///
+	/// If the socket address is unnamed or abstract,
+	/// this returns None.
+	pub fn as_path(&self) -> Option<&Path> {
+		unsafe {
+			use std::os::unix::ffi::OsStrExt;
+			let path_len = self.len() as usize - self.path_offset();
+			if path_len == 0 {
+				None
+			} else if self.inner.sun_path[0] == 0 {
+				None
+			} else {
+				// TODO: does self.len() include the trailing null byte?
+				let path: &[u8] = std::mem::transmute(&self.inner.sun_path[..path_len - 1]);
+				let path = std::ffi::OsStr::from_bytes(path);
+				Some(Path::new(path))
+			}
+		}
+	}
+
+	/// Check if the address is unnamed.
+	pub fn is_unnamed(&self) -> bool {
+		let path_len = self.len() as usize - self.path_offset();
+		path_len == 0
+	}
+
+	/// Get the offset of the path within the [`libc::sockaddr_un`] struct.
+	fn path_offset(&self) -> usize {
+		let start = &self.inner as *const _ as usize;
+		let sun_path = &self.inner.sun_path as *const _ as usize;
+		sun_path - start
 	}
 }
 
@@ -237,5 +401,4 @@ impl AsSocketAddress for SocketAddressUnix {
 }
 
 // TODO: bunch of conversions to/from std types.
-// TODO: bunch of conversions to/from libc types.
 // TODO: implement Debug in a nice manner for the types.
