@@ -222,7 +222,45 @@ impl Socket {
 		}
 	}
 
+	/// Send data over the socket to the connected peer.
+	///
+	/// Returns the number of transferred bytes, or an error.
+	///
+	/// See `man send` for more information.
+	pub fn send(&self, data: &[u8], flags: c_int) -> std::io::Result<usize> {
+		unsafe {
+			let data_ptr = data.as_ptr() as *const c_void;
+			let transferred = check_ret_isize(libc::send(self.as_raw_fd(), data_ptr, data.len(), flags | extra_flags::SENDMSG))?;
+			Ok(transferred as usize)
+		}
+	}
+
+	/// Send data over the socket to the specified address.
+	///
+	/// This function is only valid for connectionless protocols such as UDP or unix datagram sockets.
+	///
+	/// Returns the number of transferred bytes, or an error.
+	///
+	/// See `man sendto` for more information.
+	pub fn send_to<Address: AsSocketAddress>(&self, data: &[u8], address: &Address, flags: c_int) -> std::io::Result<usize> {
+		unsafe {
+			let data_ptr = data.as_ptr() as *const c_void;
+			let transferred = check_ret_isize(libc::sendto(
+				self.as_raw_fd(),
+				data_ptr,
+				data.len(),
+				flags | extra_flags::SENDMSG,
+				address.as_sockaddr(), address.len()
+			))?;
+			Ok(transferred as usize)
+		}
+	}
+
 	/// Send a message over the socket to the connected peer.
+	///
+	/// Returns the number of transferred bytes, or an error.
+	///
+	/// See `man sendmsg` for more information.
 	pub fn send_msg(&self, data: &[IoSlice], cdata: Option<&[u8]>, flags: c_int) -> std::io::Result<usize> {
 		unsafe {
 			let mut header = std::mem::zeroed::<libc::msghdr>();
@@ -238,7 +276,11 @@ impl Socket {
 
 	/// Send a message over the socket to the specified address.
 	///
-	/// This is only valid for connection-less protocols such as UDP or unix datagram sockets.
+	/// This function is only valid for connectionless protocols such as UDP or unix datagram sockets.
+	///
+	/// Returns the number of transferred bytes, or an error.
+	///
+	/// See `man sendmsg` for more information.
 	pub fn send_msg_to<Address: AsSocketAddress>(&self, address: &Address, data: &[IoSlice], cdata: Option<&[u8]>, flags: c_int) -> std::io::Result<usize> {
 		unsafe {
 			let mut header = std::mem::zeroed::<libc::msghdr>();
@@ -249,12 +291,53 @@ impl Socket {
 			header.msg_control = cdata.map(|x| x.as_ptr()).unwrap_or(std::ptr::null()) as *mut c_void;
 			header.msg_controllen = cdata.map(|x| x.len()).unwrap_or(0);
 
-			let ret = check_ret_isize(libc::sendmsg(self.as_raw_fd(), &header, flags | EXTRA_MSG_FLAGS))?;
+			let ret = check_ret_isize(libc::sendmsg(self.as_raw_fd(), &header, flags | extra_flags::SENDMSG))?;
 			Ok(ret as usize)
 		}
 	}
 
+	/// Receive a data on the socket from the connected peer.
+	///
+	/// Returns the number of transferred bytes, or an error.
+	///
+	/// See `man recvmsg` for more information.
+	pub fn recv(&self, buffer: &mut [u8], flags: c_int) -> std::io::Result<usize> {
+		unsafe {
+			let buffer_ptr = buffer.as_mut_ptr() as *mut c_void;
+			let transferred = check_ret_isize(libc::recv(self.as_raw_fd(), buffer_ptr, buffer.len(), flags | extra_flags::RECVMSG))?;
+			Ok(transferred as usize)
+		}
+	}
+
+	/// Receive a data on the socket.
+	///
+	/// Returns the address of the sender and the number of transferred bytes, or an error.
+	///
+	/// See `man recvmsg` for more information.
+	pub fn recv_from<Address: AsSocketAddress>(&self, buffer: &mut [u8], flags: c_int) -> std::io::Result<(Address, usize)> {
+		unsafe {
+			let buffer_ptr = buffer.as_mut_ptr() as *mut c_void;
+			let mut address = Address::new_empty();
+			let mut address_len = address.max_len();
+			let transferred = check_ret_isize(libc::recvfrom(
+				self.as_raw_fd(),
+				buffer_ptr,
+				buffer.len(),
+				flags,
+				address.as_sockaddr_mut(),
+				&mut address_len
+			))?;
+
+			address.set_len(address_len);
+			Ok((address, transferred as usize))
+		}
+	}
+
 	/// Receive a message on the socket from the connected peer.
+	///
+	/// Returns the number of transferred bytes, or an error.
+	///
+	/// See `man recvmsg` for more information.
 	pub fn recv_msg(&self, data: &[IoSliceMut], cdata: Option<&mut [u8]>, flags: c_int) -> std::io::Result<(usize, c_int)> {
 		let (cdata_buf, cdata_len) = if let Some(cdata) = cdata {
 			(cdata.as_mut_ptr(), cdata.len())
@@ -276,9 +359,9 @@ impl Socket {
 
 	/// Receive a message on the socket from any address.
 	///
-	/// The address of the sender is given in the return value.
+	/// Returns the address of the sender and the number of transferred bytes, or an error.
 	///
-	/// This is only valid for connection-less protocols such as UDP or unix datagram sockets.
+	/// See `man recvmsg` for more information.
 	pub fn recv_msg_from<Address: AsSocketAddress>(&self, data: &[IoSliceMut], cdata: Option<&mut [u8]>, flags: c_int) -> std::io::Result<(Address, usize, c_int)> {
 		let (cdata_buf, cdata_len) = if let Some(cdata) = cdata {
 			(cdata.as_mut_ptr(), cdata.len())
