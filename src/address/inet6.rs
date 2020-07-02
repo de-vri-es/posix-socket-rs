@@ -3,12 +3,12 @@
 /// This includes an IPv6 address and a 16-bit port number.
 #[derive(Clone)]
 #[repr(C)]
-pub struct SocketAddressInet6 {
+pub struct Inet6SocketAddress {
 	/// The inner C-compatible socket address.
 	inner: libc::sockaddr_in6,
 }
 
-impl SocketAddressInet6 {
+impl Inet6SocketAddress {
 	/// Create an IPv6 socket address.
 	pub fn new(ip: std::net::Ipv6Addr, port: u16, flowinfo: u32, scope_id: u32) -> Self {
 		let inner = libc::sockaddr_in6 {
@@ -72,7 +72,7 @@ impl SocketAddressInet6 {
 	}
 }
 
-impl crate::AsSocketAddress for SocketAddressInet6 {
+impl crate::AsSocketAddress for Inet6SocketAddress {
 	fn new_empty() -> Self {
 		unsafe { std::mem::zeroed() }
 	}
@@ -98,38 +98,38 @@ impl crate::AsSocketAddress for SocketAddressInet6 {
 	}
 }
 
-impl From<SocketAddressInet6> for crate::SocketAddress {
-	fn from(other: SocketAddressInet6) -> Self {
+impl From<Inet6SocketAddress> for crate::SocketAddress {
+	fn from(other: Inet6SocketAddress) -> Self {
 		Self::from(&other)
 	}
 }
 
-impl From<&SocketAddressInet6> for crate::SocketAddress {
-	fn from(other: &SocketAddressInet6) -> Self {
+impl From<&Inet6SocketAddress> for crate::SocketAddress {
+	fn from(other: &Inet6SocketAddress) -> Self {
 		Self::from_other(other)
 	}
 }
 
-impl From<std::net::SocketAddrV6> for SocketAddressInet6 {
+impl From<std::net::SocketAddrV6> for Inet6SocketAddress {
 	fn from(other: std::net::SocketAddrV6) -> Self {
 		Self::from(&other)
 	}
 }
 
-impl From<&std::net::SocketAddrV6> for SocketAddressInet6 {
+impl From<&std::net::SocketAddrV6> for Inet6SocketAddress {
 	fn from(other: &std::net::SocketAddrV6) -> Self {
 		Self::new(*other.ip(), other.port(), other.flowinfo(), other.scope_id())
 	}
 }
 
-impl From<SocketAddressInet6> for std::net::SocketAddrV6 {
-	fn from(other: SocketAddressInet6) -> Self {
+impl From<Inet6SocketAddress> for std::net::SocketAddrV6 {
+	fn from(other: Inet6SocketAddress) -> Self {
 		Self::from(&other)
 	}
 }
 
-impl From<&SocketAddressInet6> for std::net::SocketAddrV6 {
-	fn from(other: &SocketAddressInet6) -> Self {
+impl From<&Inet6SocketAddress> for std::net::SocketAddrV6 {
+	fn from(other: &Inet6SocketAddress) -> Self {
 		Self::new(other.ip(), other.port(), other.flowinfo(), other.scope_id())
 	}
 }

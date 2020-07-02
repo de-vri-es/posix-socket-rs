@@ -3,12 +3,12 @@
 /// This includes an IPv4 address and a 16-bit port number.
 #[derive(Clone)]
 #[repr(C)]
-pub struct SocketAddressInet4 {
+pub struct Inet4SocketAddress {
 	/// The inner C-compatible socket address.
 	inner: libc::sockaddr_in,
 }
 
-impl SocketAddressInet4 {
+impl Inet4SocketAddress {
 	/// Create an IPv4 socket address from an IP address and a port number.
 	pub fn new(ip: &std::net::Ipv4Addr, port: u16) -> Self {
 		unsafe {
@@ -60,7 +60,7 @@ impl SocketAddressInet4 {
 	}
 }
 
-impl crate::AsSocketAddress for SocketAddressInet4 {
+impl crate::AsSocketAddress for Inet4SocketAddress {
 	fn new_empty() -> Self {
 		unsafe { std::mem::zeroed() }
 	}
@@ -86,38 +86,38 @@ impl crate::AsSocketAddress for SocketAddressInet4 {
 	}
 }
 
-impl From<SocketAddressInet4> for crate::SocketAddress {
-	fn from(other: SocketAddressInet4) -> Self {
+impl From<Inet4SocketAddress> for crate::SocketAddress {
+	fn from(other: Inet4SocketAddress) -> Self {
 		Self::from(&other)
 	}
 }
 
-impl From<&SocketAddressInet4> for crate::SocketAddress {
-	fn from(other: &SocketAddressInet4) -> Self {
+impl From<&Inet4SocketAddress> for crate::SocketAddress {
+	fn from(other: &Inet4SocketAddress) -> Self {
 		Self::from_other(other)
 	}
 }
 
-impl From<std::net::SocketAddrV4> for SocketAddressInet4 {
+impl From<std::net::SocketAddrV4> for Inet4SocketAddress {
 	fn from(other: std::net::SocketAddrV4) -> Self {
 		Self::from(&other)
 	}
 }
 
-impl From<&std::net::SocketAddrV4> for SocketAddressInet4 {
+impl From<&std::net::SocketAddrV4> for Inet4SocketAddress {
 	fn from(other: &std::net::SocketAddrV4) -> Self {
 		Self::new(other.ip(), other.port())
 	}
 }
 
-impl From<SocketAddressInet4> for std::net::SocketAddrV4 {
-	fn from(other: SocketAddressInet4) -> Self {
+impl From<Inet4SocketAddress> for std::net::SocketAddrV4 {
+	fn from(other: Inet4SocketAddress) -> Self {
 		Self::from(&other)
 	}
 }
 
-impl From<&SocketAddressInet4> for std::net::SocketAddrV4 {
-	fn from(other: &SocketAddressInet4) -> Self {
+impl From<&Inet4SocketAddress> for std::net::SocketAddrV4 {
+	fn from(other: &Inet4SocketAddress) -> Self {
 		Self::new(other.ip(), other.port())
 	}
 }

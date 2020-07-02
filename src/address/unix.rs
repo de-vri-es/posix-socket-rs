@@ -7,7 +7,7 @@ use crate::AsSocketAddress;
 /// On Linux it can also be an abstract socket path, although this is not portable.
 #[derive(Clone)]
 #[repr(C)]
-pub struct SocketAddressUnix {
+pub struct UnixSocketAddress {
 	/// The inner C-compatible socket address.
 	inner: libc::sockaddr_un,
 
@@ -15,7 +15,7 @@ pub struct SocketAddressUnix {
 	len: libc::socklen_t,
 }
 
-impl SocketAddressUnix {
+impl UnixSocketAddress {
 	/// Create a Unix socket address from a path.
 	pub fn new<P: AsRef<Path>>(path: P) -> std::io::Result<Self> {
 		use std::os::unix::ffi::OsStrExt;
@@ -103,7 +103,7 @@ impl SocketAddressUnix {
 	}
 }
 
-impl crate::AsSocketAddress for SocketAddressUnix {
+impl crate::AsSocketAddress for UnixSocketAddress {
 	fn new_empty() -> Self {
 		let mut address = Self {
 			inner: unsafe { std::mem::zeroed() },
@@ -135,25 +135,25 @@ impl crate::AsSocketAddress for SocketAddressUnix {
 	}
 }
 
-impl From<SocketAddressUnix> for crate::SocketAddress {
-	fn from(other: SocketAddressUnix) -> Self {
+impl From<UnixSocketAddress> for crate::SocketAddress {
+	fn from(other: UnixSocketAddress) -> Self {
 		Self::from(&other)
 	}
 }
 
-impl From<&SocketAddressUnix> for crate::SocketAddress {
-	fn from(other: &SocketAddressUnix) -> Self {
+impl From<&UnixSocketAddress> for crate::SocketAddress {
+	fn from(other: &UnixSocketAddress) -> Self {
 		Self::from_other(other)
 	}
 }
 
-impl From<std::os::unix::net::SocketAddr> for SocketAddressUnix {
+impl From<std::os::unix::net::SocketAddr> for UnixSocketAddress {
 	fn from(other: std::os::unix::net::SocketAddr) -> Self {
 		Self::from(&other)
 	}
 }
 
-impl From<&std::os::unix::net::SocketAddr> for SocketAddressUnix {
+impl From<&std::os::unix::net::SocketAddr> for UnixSocketAddress {
 	fn from(other: &std::os::unix::net::SocketAddr) -> Self {
 		if let Some(path) = other.as_pathname() {
 			Self::new(path).unwrap()
