@@ -10,11 +10,17 @@ pub struct Socket {
 	fd: FileDesc,
 }
 
-#[cfg(not(target_os = "apple"))]
-const EXTRA_MSG_FLAGS: c_int = libc::MSG_NOSIGNAL;
+#[cfg(not(any(target_os = "apple", target_os = "solaris")))]
+mod extra_flags {
+	pub const SENDMSG: std::os::raw::c_int = libc::MSG_NOSIGNAL;
+	pub const RECVMSG: std::os::raw::c_int = libc::MSG_CMSG_CLOEXEC;
+}
 
-#[cfg(target_os = "apple")]
-const EXTRA_MSG_FLAGS: c_int = 0;
+#[cfg(any(target_os = "apple", target_os = "solaris"))]
+mod extra_flags {
+	pub const SENDMSG: std::os::raw::c_int = 0;
+	pub const RECVMSG: std::os::raw::c_int = 0;
+}
 
 impl Socket {
 	/// Wrap a file descriptor in a Socket.
@@ -225,7 +231,7 @@ impl Socket {
 			header.msg_control = cdata.map(|x| x.as_ptr()).unwrap_or(std::ptr::null()) as *mut c_void;
 			header.msg_controllen = cdata.map(|x| x.len()).unwrap_or(0);
 
-			let ret = check_ret_isize(libc::sendmsg(self.as_raw_fd(), &header, flags | EXTRA_MSG_FLAGS))?;
+			let ret = check_ret_isize(libc::sendmsg(self.as_raw_fd(), &header, flags | extra_flags::SENDMSG))?;
 			Ok(ret as usize)
 		}
 	}
@@ -263,7 +269,7 @@ impl Socket {
 			header.msg_control = cdata_buf as *mut c_void;
 			header.msg_controllen = cdata_len;
 
-			let ret = check_ret_isize(libc::recvmsg(self.as_raw_fd(), &mut header, flags | EXTRA_MSG_FLAGS))?;
+			let ret = check_ret_isize(libc::recvmsg(self.as_raw_fd(), &mut header, flags | extra_flags::RECVMSG))?;
 			Ok((ret as usize, header.msg_flags))
 		}
 	}
@@ -290,7 +296,7 @@ impl Socket {
 			header.msg_control = cdata_buf as *mut c_void;
 			header.msg_controllen = cdata_len;
 
-			let ret = check_ret_isize(libc::recvmsg(self.as_raw_fd(), &mut header, flags | EXTRA_MSG_FLAGS))?;
+			let ret = check_ret_isize(libc::recvmsg(self.as_raw_fd(), &mut header, flags | extra_flags::RECVMSG))?;
 			address.set_len(header.msg_namelen);
 			Ok((address, ret as usize, header.msg_flags))
 		}
