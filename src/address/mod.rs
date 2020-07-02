@@ -100,7 +100,7 @@ impl SocketAddress {
 	pub fn as_inet4(&self) -> Option<Inet4SocketAddress> {
 		if self.family() == libc::AF_INET {
 			let addr: &libc::sockaddr_in = unsafe { std::mem::transmute(&self.inner) };
-			Some(Inet4SocketAddress { inner: addr.clone() })
+			Some(Inet4SocketAddress::from_raw(*addr))
 		} else {
 			None
 		}
@@ -112,7 +112,7 @@ impl SocketAddress {
 	pub fn as_inet6(&self) -> Option<Inet6SocketAddress> {
 		if self.family() == libc::AF_INET6 {
 			let addr: &libc::sockaddr_in6 = unsafe { std::mem::transmute(&self.inner) };
-			Some(Inet6SocketAddress { inner: addr.clone() })
+			Some(Inet6SocketAddress::from_raw(*addr))
 		} else {
 			None
 		}
@@ -124,7 +124,7 @@ impl SocketAddress {
 	pub fn as_unix(&self) -> Option<UnixSocketAddress> {
 		if self.family() == libc::AF_LOCAL {
 			let addr: &libc::sockaddr_un = unsafe { std::mem::transmute(&self.inner) };
-			Some(UnixSocketAddress { inner: addr.clone(), len: self.len })
+			Some(UnixSocketAddress::from_raw(*addr, self.len))
 		} else {
 			None
 		}
