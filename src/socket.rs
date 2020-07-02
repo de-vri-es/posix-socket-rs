@@ -21,9 +21,12 @@ impl Socket {
 	///
 	/// On Apple systems, this sets the SO_NOSIGPIPE option to prevent SIGPIPE signals.
 	fn wrap(fd: FileDesc) -> std::io::Result<Self> {
+		let wrapped = Self { fd };
+
 		#[cfg(target_os = "apple")]
-		set_socket_option(fd, libc::SOL_SOCKET, libc::SO_NOSIGPIPE, 1 as c_int)?;
-		Ok(Self { fd })
+		wrapped.set_option(libc::SOL_SOCKET, libc::SO_NOSIGPIPE, 1 as c_int)?;
+
+		Ok(wrapped)
 	}
 
 	/// Create a new socket with the specified domain, type and protocol.
@@ -109,14 +112,40 @@ impl Socket {
 		self.fd.into_raw_fd()
 	}
 
+	/// Set a socket option.
+	///
+	/// See `man setsockopt` for more information.
+	fn set_option<T: Copy>(&self, level: c_int, option: c_int, value: T) -> std::io::Result<()> {
+		unsafe {
+			let value = &value as *const T as *const c_void;
+			let length = std::mem::size_of::<T>() as libc::socklen_t;
+			check_ret(libc::setsockopt(self.as_raw_fd(), level, option, value, length))?;
+			Ok(())
+		}
+	}
+
+	/// Get the value of a socket option.
+	///
+	/// See `man getsockopt` for more information.
+	fn get_option<T: Copy>(&self, level: c_int, option: c_int) -> std::io::Result<T> {
+		unsafe {
+			let mut output = std::mem::MaybeUninit::zeroed();
+			let output_ptr = output.as_mut_ptr() as *mut c_void;
+			let mut length = std::mem::size_of::<T>() as libc::socklen_t;
+			check_ret(libc::getsockopt(self.as_raw_fd(), level, option, output_ptr, &mut length))?;
+			assert_eq!(length, std::mem::size_of::<T>() as libc::socklen_t);
+			Ok(output.assume_init())
+		}
+	}
+
 	/// Put the socket in blocking or non-blocking mode.
 	pub fn set_nonblocking(&self, non_blocking: bool) -> std::io::Result<()> {
-		set_socket_option(self, libc::SOL_SOCKET, libc::O_NONBLOCK, bool_to_c_int(non_blocking))
+		self.set_option(libc::SOL_SOCKET, libc::O_NONBLOCK, bool_to_c_int(non_blocking))
 	}
 
 	/// Check if the socket in blocking or non-blocking mode.
 	pub fn get_nonblocking(&self) -> std::io::Result<bool> {
-		let raw: c_int = get_socket_option(self, libc::SOL_SOCKET, libc::O_NONBLOCK)?;
+		let raw: c_int = self.get_option(libc::SOL_SOCKET, libc::O_NONBLOCK)?;
 		Ok(raw != 0)
 	}
 
@@ -125,7 +154,7 @@ impl Socket {
 	/// This will retrieve the stored error in the underlying socket, clearing the field in the process.
 	/// This can be useful for checking errors between calls.
 	pub fn take_error(&self) -> std::io::Result<Option<std::io::Error>> {
-		let raw: c_int = get_socket_option(self, libc::SOL_SOCKET, libc::SO_ERROR)?;
+		let raw: c_int = self.get_option(libc::SOL_SOCKET, libc::SO_ERROR)?;
 		if raw == 0 {
 			Ok(None)
 		} else {
@@ -333,23 +362,6 @@ fn socketpair(domain: c_int, kind: c_int, protocol: c_int) -> std::io::Result<(F
 			FileDesc::from_raw_fd(fds[0]),
 			FileDesc::from_raw_fd(fds[1]),
 		))
-	}
-}
-
-fn set_socket_option<T: Copy>(fd: impl AsRawFd, level: c_int, option: c_int, value: T) -> std::io::Result<()> {
-	unsafe {
-		check_ret(libc::setsockopt(fd.as_raw_fd(), level, option, &value as *const T as *const c_void, std::mem::size_of::<T>() as libc::socklen_t))?;
-		Ok(())
-	}
-}
-
-fn get_socket_option<T: Copy>(fd: impl AsRawFd, level: c_int, option: c_int) -> std::io::Result<T> {
-	unsafe {
-		let mut output = std::mem::MaybeUninit::zeroed();
-		let mut length = std::mem::size_of::<T>() as libc::socklen_t;
-		check_ret(libc::getsockopt(fd.as_raw_fd(), level, option, output.as_mut_ptr() as *mut c_void, (&mut length) as *mut libc::socklen_t))?;
-		assert_eq!(length, std::mem::size_of::<T>() as libc::socklen_t);
-		Ok(output.assume_init())
 	}
 }
 
