@@ -8,7 +8,6 @@ pub use inet4::*;
 pub use inet6::*;
 pub use unix::*;
 
-// TODO: bunch of conversions to/from std types.
 // TODO: implement Debug in a nice manner for the types.
 
 /// A type usable as socket address.

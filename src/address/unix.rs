@@ -1,9 +1,10 @@
 use std::path::Path;
+use crate::AsSocketAddress;
 
 /// Unix socket address.
 ///
 /// A Unix socket address can be unnamed or a filesystem path.
-/// On Linux it can also be an abstract socket path.
+/// On Linux it can also be an abstract socket path, although this is not portable.
 #[derive(Clone)]
 #[repr(C)]
 pub struct SocketAddressUnix {
@@ -18,27 +19,28 @@ impl SocketAddressUnix {
 	/// Create a Unix socket address from a path.
 	pub fn new<P: AsRef<Path>>(path: P) -> std::io::Result<Self> {
 		use std::os::unix::ffi::OsStrExt;
-		let path = path.as_ref().as_os_str();
+		let path = path.as_ref().as_os_str().as_bytes();
 
 		unsafe {
 			let mut output = Self::new_empty();
 			let path_offset = output.path_offset();
-			// TODO: does self.len() include the trailing null byte?
 			if path.len() >= output.max_len() as usize - path_offset {
-				Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "path too large for socket address"))
+				Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "path is too large for a socket address"))
+			} else if path.is_empty() {
+				Ok(output)
 			} else {
 				std::ptr::copy(
-					path.as_bytes().as_ptr(),
+					path.as_ptr(),
 					output.as_sockaddr_mut() as *mut u8,
 					path.len(),
 				);
-				output.set_len((path_offset + path.len()) as u32);
+				output.set_len((path_offset + path.len() + 1) as u32);
 				Ok(output)
 			}
 		}
 	}
 
-	/// Create an IPv6 socket address from a [`libc::sockaddr_un`] and a length.
+	/// Create a Unix socket address from a [`libc::sockaddr_un`] and a length.
 	pub fn from_raw(inner: libc::sockaddr_un, len: libc::socklen_t) -> Self {
 		Self { inner, len }
 	}
@@ -48,20 +50,18 @@ impl SocketAddressUnix {
 		(self.inner, self.len)
 	}
 
-	/// Get the socket address as a [`Path`].
+	/// Get the path associated with the socket address, if there is one.
 	///
-	/// If the socket address is unnamed or abstract,
-	/// this returns None.
+	/// Returns [`None`] if the socket address is unnamed or abstract,
 	pub fn as_path(&self) -> Option<&Path> {
 		unsafe {
 			use std::os::unix::ffi::OsStrExt;
-			let path_len = self.len() as usize - self.path_offset();
+			let path_len = self.path_len();
 			if path_len == 0 {
 				None
 			} else if self.inner.sun_path[0] == 0 {
 				None
 			} else {
-				// TODO: does self.len() include the trailing null byte?
 				let path: &[u8] = std::mem::transmute(&self.inner.sun_path[..path_len - 1]);
 				let path = std::ffi::OsStr::from_bytes(path);
 				Some(Path::new(path))
@@ -71,8 +71,23 @@ impl SocketAddressUnix {
 
 	/// Check if the address is unnamed.
 	pub fn is_unnamed(&self) -> bool {
-		let path_len = self.len() as usize - self.path_offset();
-		path_len == 0
+		self.path_len() == 0
+	}
+
+	/// Get the abstract path associated with the socket address.
+	///
+	/// Returns [`None`] if the socket address is not abstract.
+	///
+	/// Abstract Unix socket addresses are a non-portable Linux extension.
+	pub fn as_abstract(&self) -> Option<&std::ffi::CStr> {
+		unsafe {
+			let path_len = self.path_len();
+			if path_len > 0 && self.inner.sun_path[0] == 0 {
+				Some(std::mem::transmute(&self.inner.sun_path[1..path_len]))
+			} else {
+				None
+			}
+		}
 	}
 
 	/// Get the offset of the path within the [`libc::sockaddr_un`] struct.
@@ -81,11 +96,21 @@ impl SocketAddressUnix {
 		let sun_path = &self.inner.sun_path as *const _ as usize;
 		sun_path - start
 	}
+
+	/// Get the length of the path portion of the address including the terminating null byte.
+	fn path_len(&self) -> usize {
+		self.len() as usize - self.path_offset()
+	}
 }
 
 impl crate::AsSocketAddress for SocketAddressUnix {
 	fn new_empty() -> Self {
-		unsafe { std::mem::zeroed() }
+		let mut address = Self {
+			inner: unsafe { std::mem::zeroed() },
+			len: 0,
+		};
+		address.len = address.path_offset() as libc::socklen_t;
+		address
 	}
 
 	fn as_sockaddr(&self) -> *const libc::sockaddr {
@@ -110,8 +135,32 @@ impl crate::AsSocketAddress for SocketAddressUnix {
 	}
 }
 
+impl From<SocketAddressUnix> for crate::SocketAddress {
+	fn from(other: SocketAddressUnix) -> Self {
+		Self::from(&other)
+	}
+}
+
 impl From<&SocketAddressUnix> for crate::SocketAddress {
 	fn from(other: &SocketAddressUnix) -> Self {
 		Self::from_other(other)
+	}
+}
+
+impl From<std::os::unix::net::SocketAddr> for SocketAddressUnix {
+	fn from(other: std::os::unix::net::SocketAddr) -> Self {
+		Self::from(&other)
+	}
+}
+
+impl From<&std::os::unix::net::SocketAddr> for SocketAddressUnix {
+	fn from(other: &std::os::unix::net::SocketAddr) -> Self {
+		if let Some(path) = other.as_pathname() {
+			Self::new(path).unwrap()
+		} else if other.is_unnamed() {
+			Self::new_empty()
+		} else {
+			panic!("attempted to convert an std::unix::net::SocketAddr that is not a path and not unnamed");
+		}
 	}
 }

@@ -9,17 +9,16 @@ pub struct SocketAddressInet6 {
 }
 
 impl SocketAddressInet6 {
-	/// Create an IPv6 socket address from an IP address and a port number.
-	pub fn new(ip: [u8; 16], port: u16) -> Self {
-		unsafe {
-			let inner = libc::sockaddr_in6 {
-				sin6_family: libc::AF_INET6 as libc::sa_family_t,
-				sin6_addr: libc::in6_addr { s6_addr: ip },
-				sin6_port: port.to_be(),
-				..std::mem::zeroed()
-			};
-			Self::from_raw(inner)
-		}
+	/// Create an IPv6 socket address.
+	pub fn new(ip: std::net::Ipv6Addr, port: u16, flowinfo: u32, scope_id: u32) -> Self {
+		let inner = libc::sockaddr_in6 {
+			sin6_family: libc::AF_INET6 as libc::sa_family_t,
+			sin6_addr: libc::in6_addr { s6_addr: ip.octets() },
+			sin6_port: port.to_be(),
+			sin6_flowinfo: flowinfo,
+			sin6_scope_id: scope_id,
+		};
+		Self::from_raw(inner)
 	}
 
 	/// Create an IPv6 socket address from a [`libc::sockaddr_in6`].
@@ -30,6 +29,46 @@ impl SocketAddressInet6 {
 	/// Convert the [`SocketAddress`] into raw [`libc`] parts.
 	pub fn into_raw(self) -> libc::sockaddr_in6 {
 		self.inner
+	}
+
+	/// Get the IP address associated with the socket address.
+	pub fn ip(&self) -> std::net::Ipv6Addr {
+		self.inner.sin6_addr.s6_addr.into()
+	}
+
+	/// Set the IP address associated with the socket address.
+	pub fn set_ip(&mut self, ip: std::net::Ipv6Addr) {
+		self.inner.sin6_addr.s6_addr = ip.octets();
+	}
+
+	/// Get the port number associated with the socket address.
+	pub fn port(&self) -> u16 {
+		u16::from_be(self.inner.sin6_port)
+	}
+
+	/// Set the port number associated with the socket address.
+	pub fn set_port(&mut self, port: u16) {
+		self.inner.sin6_port = port.to_be();
+	}
+
+	/// Get the flow information associated with the socket address.
+	fn flowinfo(&self) -> u32 {
+		self.inner.sin6_flowinfo
+	}
+
+	/// Set the flow information associated with the socket address.
+	pub fn set_flowinfo(&mut self, flowinfo: u32) {
+		self.inner.sin6_flowinfo = flowinfo;
+	}
+
+	/// Get the scope ID associated with the socket address.
+	fn scope_id(&self) -> u32 {
+		self.inner.sin6_scope_id
+	}
+
+	/// Set the scope ID associated with the socket address.
+	pub fn set_scope_id(&mut self, scope_id: u32) {
+		self.inner.sin6_scope_id = scope_id;
 	}
 }
 
@@ -59,8 +98,38 @@ impl crate::AsSocketAddress for SocketAddressInet6 {
 	}
 }
 
+impl From<SocketAddressInet6> for crate::SocketAddress {
+	fn from(other: SocketAddressInet6) -> Self {
+		Self::from(&other)
+	}
+}
+
 impl From<&SocketAddressInet6> for crate::SocketAddress {
 	fn from(other: &SocketAddressInet6) -> Self {
 		Self::from_other(other)
+	}
+}
+
+impl From<std::net::SocketAddrV6> for SocketAddressInet6 {
+	fn from(other: std::net::SocketAddrV6) -> Self {
+		Self::from(&other)
+	}
+}
+
+impl From<&std::net::SocketAddrV6> for SocketAddressInet6 {
+	fn from(other: &std::net::SocketAddrV6) -> Self {
+		Self::new(*other.ip(), other.port(), other.flowinfo(), other.scope_id())
+	}
+}
+
+impl From<SocketAddressInet6> for std::net::SocketAddrV6 {
+	fn from(other: SocketAddressInet6) -> Self {
+		Self::from(&other)
+	}
+}
+
+impl From<&SocketAddressInet6> for std::net::SocketAddrV6 {
+	fn from(other: &SocketAddressInet6) -> Self {
+		Self::new(other.ip(), other.port(), other.flowinfo(), other.scope_id())
 	}
 }
