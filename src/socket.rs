@@ -63,7 +63,7 @@ impl Socket {
 	///
 	/// See `man socketpair` and `man socket` for more information.
 	pub fn pair(domain: c_int, kind: c_int, protocol: c_int) -> std::io::Result<(Self, Self)> {
-		socketpair(domain, kind, protocol)
+		socketpair(domain, kind | libc::SOCK_CLOEXEC, protocol)
 			.or_else(|e| {
 				// Fall back to setting close-on-exec after creation if SOCK_CLOEXEC is not supported.
 				if e.raw_os_error() == Some(libc::EINVAL) {
