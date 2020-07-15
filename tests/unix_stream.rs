@@ -9,6 +9,7 @@ fn test_socketpair() {
 	assert!(b.local_addr().unwrap().is_unnamed());
 	assert!(b.peer_addr().unwrap().is_unnamed());
 
+	// Send a single character so we can't have a partial read.
 	a.send(b"a", 0).unwrap();
 
 	let mut buffer = [0u8; 16];
