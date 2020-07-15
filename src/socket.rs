@@ -399,10 +399,13 @@ impl<Address: AsSocketAddress> Socket<Address> {
 
 	/// Receive a message on the socket from the connected peer.
 	///
-	/// Returns the number of transferred bytes, or an error.
+	/// If the call succeeds, the function returns a tuple with:
+	///   * the number of transferred bytes
+	///   * the number of transferred control message bytes
+	///   * the reception flags
 	///
 	/// See `man recvmsg` for more information.
-	pub fn recv_msg(&self, data: &[IoSliceMut], cdata: Option<&mut [u8]>, flags: c_int) -> std::io::Result<(usize, c_int)> {
+	pub fn recv_msg(&self, data: &[IoSliceMut], cdata: Option<&mut [u8]>, flags: c_int) -> std::io::Result<(usize, usize, c_int)> {
 		let (cdata_buf, cdata_len) = if let Some(cdata) = cdata {
 			(cdata.as_mut_ptr(), cdata.len())
 		} else {
@@ -417,16 +420,20 @@ impl<Address: AsSocketAddress> Socket<Address> {
 			header.msg_controllen = cdata_len;
 
 			let ret = check_ret_isize(libc::recvmsg(self.as_raw_fd(), &mut header, flags | extra_flags::RECVMSG))?;
-			Ok((ret as usize, header.msg_flags))
+			Ok((ret as usize, header.msg_controllen, header.msg_flags))
 		}
 	}
 
 	/// Receive a message on the socket from any address.
 	///
-	/// Returns the address of the sender and the number of transferred bytes, or an error.
+	/// If the call succeeds, the function returns a tuple with:
+	///   * the address of the sender
+	///   * the number of transferred bytes
+	///   * the number of transferred control message bytes
+	///   * the reception flags
 	///
 	/// See `man recvmsg` for more information.
-	pub fn recv_msg_from(&self, data: &[IoSliceMut], cdata: Option<&mut [u8]>, flags: c_int) -> std::io::Result<(Address, usize, c_int)> {
+	pub fn recv_msg_from(&self, data: &[IoSliceMut], cdata: Option<&mut [u8]>, flags: c_int) -> std::io::Result<(Address, usize, usize, c_int)> {
 		let (cdata_buf, cdata_len) = if let Some(cdata) = cdata {
 			(cdata.as_mut_ptr(), cdata.len())
 		} else {
@@ -445,7 +452,7 @@ impl<Address: AsSocketAddress> Socket<Address> {
 
 			let ret = check_ret_isize(libc::recvmsg(self.as_raw_fd(), &mut header, flags | extra_flags::RECVMSG))?;
 			let address = Address::finalize(address, header.msg_namelen)?;
-			Ok((address, ret as usize, header.msg_flags))
+			Ok((address, ret as usize, header.msg_controllen, header.msg_flags))
 		}
 	}
 }
