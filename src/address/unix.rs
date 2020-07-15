@@ -1,5 +1,5 @@
+use crate::{AsSocketAddress, SpecificSocketAddress};
 use std::path::Path;
-use crate::AsSocketAddress;
 
 /// Unix socket address.
 ///
@@ -22,21 +22,42 @@ impl UnixSocketAddress {
 		let path = path.as_ref().as_os_str().as_bytes();
 
 		unsafe {
-			let mut output = Self::new_empty();
+			let mut output = Self {
+				inner: libc::sockaddr_un {
+					sun_family: Self::static_family(),
+					sun_path: std::mem::zeroed(),
+				},
+				len: 0,
+			};
 			let path_offset = output.path_offset();
-			if path.len() >= output.max_len() as usize - path_offset {
+			if path.len() >= Self::max_len() as usize - path_offset - 1 {
 				Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "path is too large for a socket address"))
 			} else if path.is_empty() {
 				Ok(output)
 			} else {
 				std::ptr::copy(
 					path.as_ptr(),
-					output.as_sockaddr_mut() as *mut u8,
+					output.inner.sun_path.as_mut_ptr() as *mut u8,
 					path.len(),
 				);
-				output.set_len((path_offset + path.len() + 1) as u32);
+				output.len = (path_offset + path.len() + 1) as libc::socklen_t;
 				Ok(output)
 			}
+		}
+	}
+
+	/// Create a new unnamed unix socket address.
+	pub fn new_unnamed() -> Self {
+		unsafe {
+			let mut address = Self {
+				inner: libc::sockaddr_un {
+					sun_family: Self::static_family(),
+					sun_path: std::mem::zeroed(),
+				},
+				len: 0,
+			};
+			address.len = address.path_offset() as libc::socklen_t;
+			address
 		}
 	}
 
@@ -103,35 +124,41 @@ impl UnixSocketAddress {
 	}
 }
 
-impl crate::AsSocketAddress for UnixSocketAddress {
-	fn new_empty() -> Self {
-		let mut address = Self {
-			inner: unsafe { std::mem::zeroed() },
-			len: 0,
-		};
-		address.len = address.path_offset() as libc::socklen_t;
-		address
+impl SpecificSocketAddress for UnixSocketAddress {
+	fn static_family() -> libc::sa_family_t {
+		libc::AF_LOCAL as libc::sa_family_t
 	}
+}
 
+unsafe impl AsSocketAddress for UnixSocketAddress {
 	fn as_sockaddr(&self) -> *const libc::sockaddr {
 		&self.inner as *const _ as *const _
 	}
 
-	fn as_sockaddr_mut(&mut self) -> *mut libc::sockaddr {
-		&mut self.inner as *mut _ as *mut _
+	fn as_sockaddr_mut(address: &mut std::mem::MaybeUninit<Self>) -> *mut libc::sockaddr {
+		unsafe { &mut address.as_mut_ptr().as_mut().unwrap().inner as *mut _ as *mut _ }
 	}
 
 	fn len(&self) -> libc::socklen_t {
 		self.len
 	}
 
-	fn set_len(&mut self, len: libc::socklen_t) {
-		assert!(len <= self.max_len());
-		self.len = len
+	fn finalize(address: std::mem::MaybeUninit<Self>, len: libc::socklen_t) -> std::io::Result<Self> {
+		unsafe {
+			let mut address = address.assume_init();
+			if address.family() != Self::static_family() {
+				return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "wrong address family, expeced AF_LOCAL"));
+			}
+			if len > Self::max_len() {
+				return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "address too large"));
+			}
+			address.len = len;
+			Ok(address)
+		}
 	}
 
-	fn max_len(&self) -> libc::socklen_t {
-		std::mem::size_of::<Self>() as libc::socklen_t
+	fn max_len() -> libc::socklen_t {
+		std::mem::size_of::<libc::sockaddr_un>() as libc::socklen_t
 	}
 }
 
@@ -158,7 +185,7 @@ impl From<&std::os::unix::net::SocketAddr> for UnixSocketAddress {
 		if let Some(path) = other.as_pathname() {
 			Self::new(path).unwrap()
 		} else if other.is_unnamed() {
-			Self::new_empty()
+			Self::new_unnamed()
 		} else {
 			panic!("attempted to convert an std::unix::net::SocketAddr that is not a path and not unnamed");
 		}

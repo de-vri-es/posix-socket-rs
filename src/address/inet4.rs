@@ -1,3 +1,5 @@
+use crate::SpecificSocketAddress;
+
 /// IPv4 socket address.
 ///
 /// This includes an IPv4 address and a 16-bit port number.
@@ -14,7 +16,7 @@ impl Inet4SocketAddress {
 		unsafe {
 			let ip : u32 = std::mem::transmute(ip.octets());
 			let inner = libc::sockaddr_in {
-				sin_family: libc::AF_INET as libc::sa_family_t,
+				sin_family: Self::static_family(),
 				sin_addr: libc::in_addr { s_addr: ip },
 				sin_port: port.to_be(),
 				..std::mem::zeroed()
@@ -60,29 +62,40 @@ impl Inet4SocketAddress {
 	}
 }
 
-impl crate::AsSocketAddress for Inet4SocketAddress {
-	fn new_empty() -> Self {
-		unsafe { std::mem::zeroed() }
+impl SpecificSocketAddress for Inet4SocketAddress {
+	fn static_family() -> libc::sa_family_t {
+		libc::AF_INET as libc::sa_family_t
 	}
+}
 
+unsafe impl crate::AsSocketAddress for Inet4SocketAddress {
 	fn as_sockaddr(&self) -> *const libc::sockaddr {
 		&self.inner as *const _ as *const _
 	}
 
-	fn as_sockaddr_mut(&mut self) -> *mut libc::sockaddr {
-		&mut self.inner as *mut _ as *mut _
+	fn as_sockaddr_mut(address: &mut std::mem::MaybeUninit<Self>) -> *mut libc::sockaddr {
+		unsafe { &mut address.as_mut_ptr().as_mut().unwrap().inner as *mut _ as *mut _ }
 	}
 
 	fn len(&self) -> libc::socklen_t {
-		self.max_len()
+		Self::max_len()
 	}
 
-	fn set_len(&mut self, len: libc::socklen_t) {
-		assert_eq!(len, self.max_len())
+	fn finalize(address: std::mem::MaybeUninit<Self>, len: libc::socklen_t) -> std::io::Result<Self> {
+		unsafe {
+			let address = address.assume_init();
+			if address.family() != Self::static_family() {
+				return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "wrong address family, expected AF_INET"));
+			}
+			if len != Self::max_len() {
+				return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "wrong address size"));
+			}
+			Ok(address)
+		}
 	}
 
-	fn max_len(&self) -> libc::socklen_t {
-		std::mem::size_of_val(&self.inner) as libc::socklen_t
+	fn max_len() -> libc::socklen_t {
+		std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t
 	}
 }
 

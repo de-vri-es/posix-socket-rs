@@ -1,3 +1,5 @@
+use crate::SpecificSocketAddress;
+
 /// IPv6 socket address.
 ///
 /// This includes an IPv6 address and a 16-bit port number.
@@ -12,7 +14,7 @@ impl Inet6SocketAddress {
 	/// Create an IPv6 socket address.
 	pub fn new(ip: std::net::Ipv6Addr, port: u16, flowinfo: u32, scope_id: u32) -> Self {
 		let inner = libc::sockaddr_in6 {
-			sin6_family: libc::AF_INET6 as libc::sa_family_t,
+			sin6_family: Self::static_family(),
 			sin6_addr: libc::in6_addr { s6_addr: ip.octets() },
 			sin6_port: port.to_be(),
 			sin6_flowinfo: flowinfo,
@@ -72,29 +74,40 @@ impl Inet6SocketAddress {
 	}
 }
 
-impl crate::AsSocketAddress for Inet6SocketAddress {
-	fn new_empty() -> Self {
-		unsafe { std::mem::zeroed() }
+impl SpecificSocketAddress for Inet6SocketAddress {
+	fn static_family() -> libc::sa_family_t {
+		libc::AF_INET6 as libc::sa_family_t
 	}
+}
 
+unsafe impl crate::AsSocketAddress for Inet6SocketAddress {
 	fn as_sockaddr(&self) -> *const libc::sockaddr {
 		&self.inner as *const _ as *const _
 	}
 
-	fn as_sockaddr_mut(&mut self) -> *mut libc::sockaddr {
-		&mut self.inner as *mut _ as *mut _
+	fn as_sockaddr_mut(address: &mut std::mem::MaybeUninit<Self>) -> *mut libc::sockaddr {
+		unsafe { &mut address.as_mut_ptr().as_mut().unwrap().inner as *mut _ as *mut _ }
 	}
 
 	fn len(&self) -> libc::socklen_t {
-		self.max_len()
+		Self::max_len()
 	}
 
-	fn set_len(&mut self, len: libc::socklen_t) {
-		assert_eq!(len, self.max_len())
+	fn finalize(address: std::mem::MaybeUninit<Self>, len: libc::socklen_t) -> std::io::Result<Self> {
+		unsafe {
+			let address = address.assume_init();
+			if address.family() != Self::static_family() {
+				return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "wrong address family, expeced AF_INET6"));
+			}
+			if len != Self::max_len() {
+				return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "wrong address size"));
+			}
+			Ok(address)
+		}
 	}
 
-	fn max_len(&self) -> libc::socklen_t {
-		std::mem::size_of_val(&self.inner) as libc::socklen_t
+	fn max_len() -> libc::socklen_t {
+		std::mem::size_of::<libc::sockaddr_in6>() as libc::socklen_t
 	}
 }
 

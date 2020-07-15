@@ -10,47 +10,56 @@ pub use unix::*;
 
 // TODO: implement Debug in a nice manner for the types.
 
-/// A type usable as socket address.
-pub trait AsSocketAddress {
-	/// Construct a new instance that is usable to copy an address into.
-	///
-	/// After construction, an address may be written into the memory pointed to by [`as_sockaddr_mut()`],
-	/// limited by [`max_len()`].
-	/// Afterwards, [`set_len()`] will be called with the actual address length.
-	fn new_empty() -> Self;
+/// A socket address that supports multiple address families at runtime.
+pub trait GenericSocketAddress: AsSocketAddress {}
 
+/// A socket address that only supports one specific family.
+pub trait SpecificSocketAddress: AsSocketAddress {
+	/// The address family supported by this socket address.
+	fn static_family() -> libc::sa_family_t;
+}
+
+/// A type that is binary compatible with a socket address.
+///
+/// # Safety
+/// It must be valid to construct a new address as [`std::mem::MaybeUninit::new_zeroed()`]
+/// and then write the socket address to the pointer returned by [`as_sockaddr_mut()`].
+pub unsafe trait AsSocketAddress: Sized {
 	/// Get a pointer to the socket address.
 	///
 	/// In reality, this should point to a struct that is compatible with [`libc::sockaddr`],
 	/// but is not [`libc::sockaddr`] itself.
 	fn as_sockaddr(&self) -> *const libc::sockaddr;
 
+	/// Get the lengths of the socket address.
+	///
+	/// This is the length of the entire socket address, including the `sa_family` field.
+	fn len(&self) -> libc::socklen_t;
+
+	/// Get the address family of the socket address.
+	fn family(&self) -> libc::sa_family_t {
+		unsafe {
+			(*self.as_sockaddr()).sa_family
+		}
+	}
+
 	/// Get a mutable pointer to the socket address.
 	///
 	/// In reality, this should point to a struct that is compatible with [`libc::sockaddr`],
 	/// but is not [`libc::sockaddr`] itself.
-	fn as_sockaddr_mut(&mut self) -> *mut libc::sockaddr;
-
-	/// Get the lengths of the socket address.
-	///
-	/// This is the length of the entire socket address, including the `sa_familly` field.
-	fn len(&self) -> libc::socklen_t;
-
-	/// Update the lengths of the address.
-	///
-	/// This must be the length of the entire socket address, including the `sa_familly` field.
-	///
-	/// It is called after the kernel wrote an address to the memory pointed at by [`as_sockaddr_mut()`](AsSocketAddress::as_sockaddr_mut).
-	///
-	/// # Panic
-	/// This function should panic if the length is invalid for the specific address type.
-	fn set_len(&mut self, len: libc::socklen_t);
+	fn as_sockaddr_mut(address: &mut std::mem::MaybeUninit<Self>) -> *mut libc::sockaddr;
 
 	/// Get the maximum size of for the socket address.
 	///
 	/// This is used to tell the kernel how much it is allowed to write to the memory
 	/// pointed at by [`as_sockaddr_mut()`](AsSocketAddress::as_sockaddr_mut).
-	fn max_len(&self) -> libc::socklen_t;
+	fn max_len() -> libc::socklen_t;
+
+	/// Finalize a socket address that has been written into by the kernel.
+	///
+	/// This should check the address family and the length to ensure the address is valid.
+	/// The length is the length of the entire socket address, including the `sa_family` field.
+	fn finalize(address: std::mem::MaybeUninit<Self>, len: libc::socklen_t) -> std::io::Result<Self>;
 }
 
 /// Generic socket address, large enough to hold any valid address.
@@ -73,14 +82,13 @@ impl SocketAddress {
 	/// Create a generic [`SocketAddress`] by copying data from another address.
 	pub fn from_other<Address: AsSocketAddress>(other: &Address) -> Self {
 		unsafe {
-			let mut output = Self::new_empty();
+			let mut output = std::mem::MaybeUninit::zeroed();
 			std::ptr::copy(
 				other.as_sockaddr(),
-				output.as_sockaddr_mut(),
+				AsSocketAddress::as_sockaddr_mut(&mut output),
 				other.len() as usize
 			);
-			output.set_len(other.len());
-			output
+			AsSocketAddress::finalize(output, other.len()).unwrap()
 		}
 	}
 
@@ -131,29 +139,33 @@ impl SocketAddress {
 	}
 }
 
-impl AsSocketAddress for SocketAddress {
-	fn new_empty() -> Self {
-		unsafe { std::mem::zeroed() }
-	}
-
+unsafe impl AsSocketAddress for SocketAddress {
 	fn as_sockaddr(&self) -> *const libc::sockaddr {
 		&self.inner as *const _ as *const _
 	}
 
-	fn as_sockaddr_mut(&mut self) -> *mut libc::sockaddr {
-		&mut self.inner as *mut _ as *mut _
+	fn as_sockaddr_mut(address: &mut std::mem::MaybeUninit<Self>) -> *mut libc::sockaddr {
+		unsafe { &mut address.as_mut_ptr().as_mut().unwrap().inner as *mut _ as *mut _ }
 	}
 
 	fn len(&self) -> libc::socklen_t {
 		self.len
 	}
 
-	fn set_len(&mut self, len: libc::socklen_t) {
-		assert!(len <= self.max_len());
-		self.len = len
+	fn finalize(address: std::mem::MaybeUninit<Self>, len: libc::socklen_t) -> std::io::Result<Self> {
+		unsafe {
+			let mut address = address.assume_init();
+			if len > Self::max_len() {
+				return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "address too large"));
+			}
+			address.len = len;
+			Ok(address)
+		}
 	}
 
-	fn max_len(&self) -> libc::socklen_t {
-		std::mem::size_of_val(&self.inner) as libc::socklen_t
+	fn max_len() -> libc::socklen_t {
+		std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t
 	}
 }
+
+impl GenericSocketAddress for SocketAddress {}
