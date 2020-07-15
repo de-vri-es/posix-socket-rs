@@ -236,7 +236,7 @@ impl<Address: AsSocketAddress> Socket<Address> {
 	///
 	/// It depends on the exact socket type what it means to connect the socket.
 	/// See `man connect` for more information.
-	pub fn connect(&self, address: Address) -> std::io::Result<()> {
+	pub fn connect(&self, address: &Address) -> std::io::Result<()> {
 		unsafe {
 			check_ret(libc::connect(self.as_raw_fd(), address.as_sockaddr(), address.len()))?;
 			Ok(())
@@ -246,7 +246,7 @@ impl<Address: AsSocketAddress> Socket<Address> {
 	/// Bind the socket to a local address.
 	///
 	/// It depends on the exact socket type what it means to bind the socket.
-	/// See `man connect` for more information.
+	/// See `man bind` for more information.
 	pub fn bind(&self, address: &Address) -> std::io::Result<()> {
 		unsafe {
 			check_ret(libc::bind(self.as_raw_fd(), address.as_sockaddr(), address.len()))?;
@@ -364,7 +364,7 @@ impl<Address: AsSocketAddress> Socket<Address> {
 	///
 	/// Returns the number of transferred bytes, or an error.
 	///
-	/// See `man recvmsg` for more information.
+	/// See `man recv` for more information.
 	pub fn recv(&self, buffer: &mut [u8], flags: c_int) -> std::io::Result<usize> {
 		unsafe {
 			let buffer_ptr = buffer.as_mut_ptr() as *mut c_void;
@@ -377,7 +377,7 @@ impl<Address: AsSocketAddress> Socket<Address> {
 	///
 	/// Returns the address of the sender and the number of transferred bytes, or an error.
 	///
-	/// See `man recvmsg` for more information.
+	/// See `man recvfrom` for more information.
 	pub fn recv_from(&self, buffer: &mut [u8], flags: c_int) -> std::io::Result<(Address, usize)> {
 		unsafe {
 			let buffer_ptr = buffer.as_mut_ptr() as *mut c_void;
