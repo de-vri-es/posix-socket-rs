@@ -6,8 +6,9 @@ use std::os::unix::io::{RawFd, AsRawFd, IntoRawFd, FromRawFd};
 use crate::AsSocketAddress;
 
 /// A POSIX socket.
-pub struct Socket {
+pub struct Socket<Address> {
 	fd: FileDesc,
+	_address: std::marker::PhantomData<fn() -> Address>,
 }
 
 #[cfg(not(any(target_os = "apple", target_os = "solaris")))]
@@ -22,12 +23,15 @@ mod extra_flags {
 	pub const RECVMSG: std::os::raw::c_int = 0;
 }
 
-impl Socket {
+impl<Address: AsSocketAddress> Socket<Address> {
 	/// Wrap a file descriptor in a Socket.
 	///
 	/// On Apple systems, this sets the SO_NOSIGPIPE option to prevent SIGPIPE signals.
 	fn wrap(fd: FileDesc) -> std::io::Result<Self> {
-		let wrapped = Self { fd };
+		let wrapped = Self {
+			fd,
+			_address: std::marker::PhantomData,
+		};
 
 		#[cfg(target_os = "apple")]
 		wrapped.set_option(libc::SOL_SOCKET, libc::SO_NOSIGPIPE, 1 as c_int)?;
@@ -35,13 +39,31 @@ impl Socket {
 		Ok(wrapped)
 	}
 
-	/// Create a new socket with the specified domain, type and protocol.
+	/// Create a new socket with the specified type and protocol.
+	///
+	/// The domain is taken from the `Address` type.
 	///
 	/// The created socket has the `close-on-exec` flag set.
 	/// The flag will be set atomically when the socket is created if the platform supports it.
 	///
 	/// See `man socket` for more information.
-	pub fn new(domain: c_int, kind: c_int, protocol: c_int) -> std::io::Result<Self> {
+	pub fn new(kind: c_int, protocol: c_int) -> std::io::Result<Self>
+	where
+		Address: crate::SpecificSocketAddress,
+	{
+		Self::new_generic(Address::static_family() as c_int, kind, protocol)
+	}
+
+	/// Create a new socket with the specified domain, type and protocol.
+	///
+	/// Unless you are working with generic socket addresses,
+	/// you should normally prefer `Self::new`.
+	///
+	/// The created socket has the `close-on-exec` flag set.
+	/// The flag will be set atomically when the socket is created if the platform supports it.
+	///
+	/// See `man socket` for more information.
+	pub fn new_generic(domain: c_int, kind: c_int, protocol: c_int) -> std::io::Result<Self> {
 		socket(domain, kind | libc::SOCK_CLOEXEC, protocol)
 			.or_else(|e| {
 				// Fall back to setting close-on-exec after creation if SOCK_CLOEXEC is not supported.
@@ -56,13 +78,31 @@ impl Socket {
 			.and_then(Self::wrap)
 	}
 
-	/// Create a connected pair of socket with the specified domain, type and protocol.
+	/// Create a connected pair of socket with the specified type and protocol.
+	///
+	/// The domain is taken from the `Address` type.
 	///
 	/// The created sockets have the `close-on-exec` flag set.
 	/// The flag will be set atomically when the sockets are created if the platform supports it.
 	///
 	/// See `man socketpair` and `man socket` for more information.
-	pub fn pair(domain: c_int, kind: c_int, protocol: c_int) -> std::io::Result<(Self, Self)> {
+	pub fn pair(kind: c_int, protocol: c_int) -> std::io::Result<(Self, Self)>
+	where
+		Address: crate::SpecificSocketAddress,
+	{
+		Self::pair_generic(Address::static_family() as c_int, kind, protocol)
+	}
+
+	/// Create a connected pair of socket with the specified domain, type and protocol.
+	///
+	/// Unless you are working with generic socket addresses,
+	/// you should normally prefer `Self::pair`.
+	///
+	/// The created sockets have the `close-on-exec` flag set.
+	/// The flag will be set atomically when the sockets are created if the platform supports it.
+	///
+	/// See `man socketpair` and `man socket` for more information.
+	pub fn pair_generic(domain: c_int, kind: c_int, protocol: c_int) -> std::io::Result<(Self, Self)> {
 		socketpair(domain, kind | libc::SOCK_CLOEXEC, protocol)
 			.or_else(|e| {
 				// Fall back to setting close-on-exec after creation if SOCK_CLOEXEC is not supported.
@@ -88,7 +128,10 @@ impl Socket {
 	/// The underlying file descriptor of the new socket will have the `close-on-exec` flag set.
 	/// If the platform supports it, the flag will be set atomically when the file descriptor is duplicated.
 	pub fn try_clone(&self) -> std::io::Result<Self> {
-		Ok(Self { fd: self.fd.duplicate()? })
+		Ok(Self {
+			fd: self.fd.duplicate()?,
+			_address: std::marker::PhantomData,
+		})
 	}
 
 	/// Wrap a raw file descriptor in a [`Socket`].
@@ -99,6 +142,7 @@ impl Socket {
 	pub unsafe fn from_raw_fd(fd: RawFd) -> Self {
 		Self {
 			fd: FileDesc::from_raw_fd(fd),
+			_address: std::marker::PhantomData,
 		}
 	}
 
@@ -168,11 +212,31 @@ impl Socket {
 		}
 	}
 
+	/// Get the local address the socket is bound to.
+	pub fn local_addr(&self) -> std::io::Result<Address> {
+		unsafe {
+			let mut address = std::mem::MaybeUninit::<Address>::zeroed();
+			let mut len = Address::max_len();
+			check_ret(libc::getsockname(self.as_raw_fd(), Address::as_sockaddr_mut(&mut address), &mut len))?;
+			Address::finalize(address, len)
+		}
+	}
+
+	/// Get the remote address the socket is connected to.
+	pub fn peer_addr(&self) -> std::io::Result<Address> {
+		unsafe {
+			let mut address = std::mem::MaybeUninit::<Address>::zeroed();
+			let mut len = Address::max_len();
+			check_ret(libc::getpeername(self.as_raw_fd(), Address::as_sockaddr_mut(&mut address), &mut len))?;
+			Address::finalize(address, len)
+		}
+	}
+
 	/// Connect the socket to a remote address.
 	///
 	/// It depends on the exact socket type what it means to connect the socket.
 	/// See `man connect` for more information.
-	pub fn connect<Address: AsSocketAddress>(&self, address: Address) -> std::io::Result<()> {
+	pub fn connect(&self, address: Address) -> std::io::Result<()> {
 		unsafe {
 			check_ret(libc::connect(self.as_raw_fd(), address.as_sockaddr(), address.len()))?;
 			Ok(())
@@ -183,7 +247,7 @@ impl Socket {
 	///
 	/// It depends on the exact socket type what it means to bind the socket.
 	/// See `man connect` for more information.
-	pub fn bind<Address: AsSocketAddress>(&self, address: Address) -> std::io::Result<()> {
+	pub fn bind(&self, address: &Address) -> std::io::Result<()> {
 		unsafe {
 			check_ret(libc::bind(self.as_raw_fd(), address.as_sockaddr(), address.len()))?;
 			Ok(())
@@ -211,13 +275,13 @@ impl Socket {
 	///
 	/// Not all socket types can be put into listening mode or accept connections.
 	/// See `man listen` for more information.
-	pub fn accept<Address: AsSocketAddress>(&self) -> std::io::Result<(Self, Address)> {
+	pub fn accept(&self) -> std::io::Result<(Self, Address)> {
 		unsafe {
-			let mut address = Address::new_empty();
-			let mut len = address.max_len();
-			let fd = check_ret(libc::accept4(self.as_raw_fd(), address.as_sockaddr_mut(), &mut len, libc::SOCK_CLOEXEC))?;
+			let mut address = std::mem::MaybeUninit::zeroed();
+			let mut len = Address::max_len();
+			let fd = check_ret(libc::accept4(self.as_raw_fd(), Address::as_sockaddr_mut(&mut address), &mut len, libc::SOCK_CLOEXEC))?;
 			let socket = Self::wrap(FileDesc::from_raw_fd(fd))?;
-			address.set_len(len);
+			let address = Address::finalize(address, len)?;
 			Ok((socket, address))
 		}
 	}
@@ -242,7 +306,7 @@ impl Socket {
 	/// Returns the number of transferred bytes, or an error.
 	///
 	/// See `man sendto` for more information.
-	pub fn send_to<Address: AsSocketAddress>(&self, data: &[u8], address: &Address, flags: c_int) -> std::io::Result<usize> {
+	pub fn send_to(&self, data: &[u8], address: &Address, flags: c_int) -> std::io::Result<usize> {
 		unsafe {
 			let data_ptr = data.as_ptr() as *const c_void;
 			let transferred = check_ret_isize(libc::sendto(
@@ -281,7 +345,7 @@ impl Socket {
 	/// Returns the number of transferred bytes, or an error.
 	///
 	/// See `man sendmsg` for more information.
-	pub fn send_msg_to<Address: AsSocketAddress>(&self, address: &Address, data: &[IoSlice], cdata: Option<&[u8]>, flags: c_int) -> std::io::Result<usize> {
+	pub fn send_msg_to(&self, address: &Address, data: &[IoSlice], cdata: Option<&[u8]>, flags: c_int) -> std::io::Result<usize> {
 		unsafe {
 			let mut header = std::mem::zeroed::<libc::msghdr>();
 			header.msg_name = address.as_sockaddr() as *mut c_void;
@@ -314,21 +378,21 @@ impl Socket {
 	/// Returns the address of the sender and the number of transferred bytes, or an error.
 	///
 	/// See `man recvmsg` for more information.
-	pub fn recv_from<Address: AsSocketAddress>(&self, buffer: &mut [u8], flags: c_int) -> std::io::Result<(Address, usize)> {
+	pub fn recv_from(&self, buffer: &mut [u8], flags: c_int) -> std::io::Result<(Address, usize)> {
 		unsafe {
 			let buffer_ptr = buffer.as_mut_ptr() as *mut c_void;
-			let mut address = Address::new_empty();
-			let mut address_len = address.max_len();
+			let mut address = std::mem::MaybeUninit::zeroed();
+			let mut address_len = Address::max_len();
 			let transferred = check_ret_isize(libc::recvfrom(
 				self.as_raw_fd(),
 				buffer_ptr,
 				buffer.len(),
 				flags,
-				address.as_sockaddr_mut(),
+				Address::as_sockaddr_mut(&mut address),
 				&mut address_len
 			))?;
 
-			address.set_len(address_len);
+			let address = Address::finalize(address, address_len)?;
 			Ok((address, transferred as usize))
 		}
 	}
@@ -362,7 +426,7 @@ impl Socket {
 	/// Returns the address of the sender and the number of transferred bytes, or an error.
 	///
 	/// See `man recvmsg` for more information.
-	pub fn recv_msg_from<Address: AsSocketAddress>(&self, data: &[IoSliceMut], cdata: Option<&mut [u8]>, flags: c_int) -> std::io::Result<(Address, usize, c_int)> {
+	pub fn recv_msg_from(&self, data: &[IoSliceMut], cdata: Option<&mut [u8]>, flags: c_int) -> std::io::Result<(Address, usize, c_int)> {
 		let (cdata_buf, cdata_len) = if let Some(cdata) = cdata {
 			(cdata.as_mut_ptr(), cdata.len())
 		} else {
@@ -370,41 +434,41 @@ impl Socket {
 		};
 
 		unsafe {
-			let mut address = Address::new_empty();
+			let mut address = std::mem::MaybeUninit::zeroed();
 			let mut header = std::mem::zeroed::<libc::msghdr>();
-			header.msg_name = address.as_sockaddr_mut() as *mut c_void;
-			header.msg_namelen = address.max_len();
+			header.msg_name = Address::as_sockaddr_mut(&mut address) as *mut c_void;
+			header.msg_namelen = Address::max_len();
 			header.msg_iov = data.as_ptr() as *mut libc::iovec;
 			header.msg_iovlen = data.len();
 			header.msg_control = cdata_buf as *mut c_void;
 			header.msg_controllen = cdata_len;
 
 			let ret = check_ret_isize(libc::recvmsg(self.as_raw_fd(), &mut header, flags | extra_flags::RECVMSG))?;
-			address.set_len(header.msg_namelen);
+			let address = Address::finalize(address, header.msg_namelen)?;
 			Ok((address, ret as usize, header.msg_flags))
 		}
 	}
 }
 
-impl FromRawFd for Socket {
+impl<Address: AsSocketAddress> FromRawFd for Socket<Address> {
 	unsafe fn from_raw_fd(fd: RawFd) -> Self {
 		Self::from_raw_fd(fd)
 	}
 }
 
-impl AsRawFd for Socket {
+impl<Address: AsSocketAddress> AsRawFd for Socket<Address> {
 	fn as_raw_fd(&self) -> RawFd {
 		self.as_raw_fd()
 	}
 }
 
-impl AsRawFd for &'_ Socket {
+impl<Address: AsSocketAddress> AsRawFd for &'_ Socket<Address> {
 	fn as_raw_fd(&self) -> RawFd {
 		(*self).as_raw_fd()
 	}
 }
 
-impl IntoRawFd for Socket {
+impl<Address: AsSocketAddress> IntoRawFd for Socket<Address> {
 	fn into_raw_fd(self) -> RawFd {
 		self.into_raw_fd()
 	}

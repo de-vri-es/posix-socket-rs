@@ -15,6 +15,10 @@ pub use address::*;
 mod socket;
 pub use socket::*;
 
+pub type UnixSocket = Socket<UnixSocketAddress>;
+pub type Inet4Socket = Socket<Inet4SocketAddress>;
+pub type Inet6Socket = Socket<Inet6SocketAddress>;
+
 /// Disable SIGPIPE for the current process.
 ///
 /// Writing to a closed socket may cause a SIGPIPE to be sent to the process (depending on the socket type).
