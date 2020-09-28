@@ -3,6 +3,7 @@ v0.2.0:
   * Implement `send`, `send_to`, `recv` and `recv_from`.
   * Expose `set_option` and `get_option`.
   * Fix creation of socket pairs with close-on-exec set.
+  * Add `mio` support as optional feature.
 
 v0.1.0:
   * Initial release.

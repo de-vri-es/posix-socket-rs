@@ -19,3 +19,4 @@ assert2 = "0.2.1"
 [dependencies]
 filedesc = "0.1.0"
 libc = "0.2.71"
+mio = { version = "0.7.0", optional = true }

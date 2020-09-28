@@ -15,6 +15,9 @@ pub use address::*;
 mod socket;
 pub use socket::*;
 
+#[cfg(fceature = "mio")]
+pub mod mio;
+
 pub type UnixSocket = Socket<UnixSocketAddress>;
 pub type Inet4Socket = Socket<Inet4SocketAddress>;
 pub type Inet6Socket = Socket<Inet6SocketAddress>;
