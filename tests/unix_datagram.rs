@@ -1,5 +1,6 @@
 use assert2::assert;
 use posix_socket::{UnixSocket, UnixSocketAddress};
+use posix_socket::ancillary::SocketAncillary;
 use std::io::{IoSlice, IoSliceMut};
 
 mod util;
@@ -28,9 +29,11 @@ fn test_send_msg_recv_msg() {
 	assert!(let Ok(6) = a.send_msg(&[IoSlice::new(b"hello!")], None, 0));
 
 	let mut buffer = [0u8; 16];
-	let (len, cmsg_len, _flags) = b.recv_msg(&[IoSliceMut::new(&mut buffer)], None, 0).unwrap();
+	let mut ancillary = SocketAncillary::new(&mut []);
+	let (len, _flags) = b.recv_msg(&[IoSliceMut::new(&mut buffer)], &mut ancillary, 0).unwrap();
 	assert!(len == 6);
-	assert!(cmsg_len == 0);
+	assert!(ancillary.len() == 0);
+	assert!(ancillary.truncated() == false);
 	assert!(&buffer[..len] == b"hello!");
 
 	drop(b);

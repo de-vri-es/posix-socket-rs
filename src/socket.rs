@@ -4,6 +4,7 @@ use std::os::raw::{c_int, c_void};
 use std::os::unix::io::{RawFd, AsRawFd, IntoRawFd, FromRawFd};
 
 use crate::AsSocketAddress;
+use crate::ancillary::SocketAncillary;
 
 /// A POSIX socket.
 pub struct Socket<Address> {
@@ -405,11 +406,11 @@ impl<Address: AsSocketAddress> Socket<Address> {
 	///   * the reception flags
 	///
 	/// See `man recvmsg` for more information.
-	pub fn recv_msg(&self, data: &[IoSliceMut], cdata: Option<&mut [u8]>, flags: c_int) -> std::io::Result<(usize, usize, c_int)> {
-		let (cdata_buf, cdata_len) = if let Some(cdata) = cdata {
-			(cdata.as_mut_ptr(), cdata.len())
-		} else {
+	pub fn recv_msg(&self, data: &[IoSliceMut], cdata: &mut SocketAncillary, flags: c_int) -> std::io::Result<(usize, c_int)> {
+		let (cdata_buf, cdata_len) = if cdata.capacity() == 0 {
 			(std::ptr::null_mut(), 0)
+		} else {
+			(cdata.buffer.as_mut_ptr(), cdata.capacity())
 		};
 
 		unsafe {
@@ -420,7 +421,10 @@ impl<Address: AsSocketAddress> Socket<Address> {
 			header.msg_controllen = cdata_len;
 
 			let ret = check_ret_isize(libc::recvmsg(self.as_raw_fd(), &mut header, flags | extra_flags::RECVMSG))?;
-			Ok((ret as usize, header.msg_controllen, header.msg_flags))
+
+			cdata.length = header.msg_controllen as usize;
+			cdata.truncated = header.msg_flags & libc::MSG_CTRUNC != 0;
+			Ok((ret as usize, header.msg_flags))
 		}
 	}
 
@@ -433,11 +437,11 @@ impl<Address: AsSocketAddress> Socket<Address> {
 	///   * the reception flags
 	///
 	/// See `man recvmsg` for more information.
-	pub fn recv_msg_from(&self, data: &[IoSliceMut], cdata: Option<&mut [u8]>, flags: c_int) -> std::io::Result<(Address, usize, usize, c_int)> {
-		let (cdata_buf, cdata_len) = if let Some(cdata) = cdata {
-			(cdata.as_mut_ptr(), cdata.len())
-		} else {
+	pub fn recv_msg_from(&self, data: &[IoSliceMut], cdata: &mut SocketAncillary, flags: c_int) -> std::io::Result<(Address, usize, c_int)> {
+		let (cdata_buf, cdata_len) = if cdata.capacity() == 0 {
 			(std::ptr::null_mut(), 0)
+		} else {
+			(cdata.buffer.as_mut_ptr(), cdata.capacity())
 		};
 
 		unsafe {
@@ -452,7 +456,9 @@ impl<Address: AsSocketAddress> Socket<Address> {
 
 			let ret = check_ret_isize(libc::recvmsg(self.as_raw_fd(), &mut header, flags | extra_flags::RECVMSG))?;
 			let address = Address::finalize(address, header.msg_namelen)?;
-			Ok((address, ret as usize, header.msg_controllen, header.msg_flags))
+			cdata.length = header.msg_controllen as usize;
+			cdata.truncated = header.msg_flags & libc::MSG_CTRUNC != 0;
+			Ok((address, ret as usize, header.msg_flags))
 		}
 	}
 }
