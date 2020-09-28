@@ -15,6 +15,8 @@ pub use address::*;
 mod socket;
 pub use socket::*;
 
+pub mod ancillary;
+
 #[cfg(fceature = "mio")]
 pub mod mio;
 
